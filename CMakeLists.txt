@@ -17,6 +17,7 @@ add_executable(${PROJECT_NAME}
     lib/display_touch.cpp
     lib/rgb_pot.cpp
     lib/buzzer_audio.cpp
+    lib/sound_sensor.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE
