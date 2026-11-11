@@ -50,6 +50,7 @@ public:
     static void drawRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color);
     static void drawFastHLine(int16_t x, int16_t y, int16_t w, uint16_t color);
     static void drawFastVLine(int16_t x, int16_t y, int16_t h, uint16_t color);
+    static void fillTriangle(int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t x2, int16_t y2, uint16_t color);
     static void drawChar(int16_t x, int16_t y, char c, uint16_t color, uint16_t bg, uint8_t size = 1);
     static void drawString(int16_t x, int16_t y, const std::string& str, uint16_t color, uint16_t bg, uint8_t size = 1);
 

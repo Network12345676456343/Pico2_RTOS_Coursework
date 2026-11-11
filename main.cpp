@@ -1,21 +1,26 @@
 #include "pico/stdlib.h"
 #include "display_touch.hpp"
+#include "rgb_pot.hpp"
 #include <cstdio>
-#include <string>
 
-struct Button {
+struct TouchButton {
     int16_t x, y, w, h;
     const char* label;
-    uint16_t color;
+    uint16_t bgColor;
+    uint16_t textColor;
 
     bool contains(int16_t px, int16_t py) const {
         return (px >= x && px <= x + w && py >= y && py <= y + h);
     }
 
-    void draw() const {
-        DisplayDriver::fillRect(x, y, w, h, color);
-        DisplayDriver::drawRect(x, y, w, h, Colors::WHITE);
-        DisplayDriver::drawString(x + 10, y + (h / 2) - 6, label, Colors::WHITE, color, 2);
+    void draw(bool selected = false) const {
+        DisplayDriver::fillRect(x, y, w, h, bgColor);
+        // Відображаємо білу рамку навколо обраної кнопки
+        DisplayDriver::drawRect(x, y, w, h, selected ? Colors::WHITE : Colors::DARKGRAY);
+        if (selected) {
+            DisplayDriver::drawRect(x + 1, y + 1, w - 2, h - 2, Colors::WHITE);
+        }
+        DisplayDriver::drawString(x + 20, y + (h / 2) - 8, label, textColor, bgColor, 2);
     }
 };
 
@@ -25,64 +30,58 @@ int main() {
     // 1. Ініціалізація периферії
     DisplayDriver::init();
     TouchDriver::init();
+    LedController::init();
 
-    // 2. Інтерфейс
     DisplayDriver::fillScreen(Colors::DARKGRAY);
 
     // Заголовок
-    DisplayDriver::fillRect(0, 0, LCD_WIDTH, 30, Colors::BLUE);
-    DisplayDriver::drawString(40, 7, "Pico 2 Display & Touch UI", Colors::WHITE, Colors::BLUE, 2);
+    DisplayDriver::fillRect(0, 0, LCD_WIDTH, 35, Colors::BLUE);
+    DisplayDriver::drawString(25, 9, "TOUCH LED CONTROLLER", Colors::WHITE, Colors::BLUE, 2);
 
-    // Кнопки
-    Button btnIncrement = { 20,  45, 130, 45, "+ Count",  Colors::GREEN };
-    Button btnClear     = { 170, 45, 130, 45, "Clear",    Colors::RED };
-    Button btnBL        = { 20,  100, 130, 40, "BL Toggle",Colors::MAGENTA };
+    // 4 сенсорні кнопки (під піни IO18, IO20, IO19)
+    TouchButton btnRed    = { 20,  50, 280, 40, "1. RED LED   (IO18)", Colors::RED,    Colors::WHITE };
+    TouchButton btnYellow = { 20,  98, 280, 40, "2. YELLOW LED(IO20)", Colors::YELLOW, Colors::BLACK };
+    TouchButton btnGreen  = { 20, 146, 280, 40, "3. GREEN LED (IO19)", Colors::GREEN,  Colors::BLACK };
+    TouchButton btnOff    = { 20, 194, 280, 38, "4. ALL OFF",          Colors::BLACK,  Colors::WHITE };
 
-    btnIncrement.draw();
-    btnClear.draw();
-    btnBL.draw();
+    btnRed.draw(false);
+    btnYellow.draw(false);
+    btnGreen.draw(false);
+    btnOff.draw(true); // За замовчуванням усі діоди вимкнені
 
-    // Зона для малювання / дотиків
-    DisplayDriver::drawRect(15, 150, 290, 80, Colors::CYAN);
-    DisplayDriver::drawString(25, 155, "Touch Pad Area (Draw Here):", Colors::CYAN, Colors::DARKGRAY, 1);
-
-    int count = 0;
-    bool backlightState = true;
+    int activeLed = 0; // 0 = off, 1 = red, 2 = yellow, 3 = green
     int16_t tx = 0, ty = 0;
     bool wasPressed = false;
 
-    char strBuf[32];
-
     while (true) {
-        // Оновлюємо статус лічильника
-        snprintf(strBuf, sizeof(strBuf), "Count: %-4d", count);
-        DisplayDriver::drawString(175, 112, strBuf, Colors::YELLOW, Colors::DARKGRAY, 2);
+        bool isTouched = TouchDriver::getTouch(tx, ty);
 
-        // Перевірка тача
-        if (TouchDriver::getTouch(tx, ty)) {
-            // Відображаємо координати
-            snprintf(strBuf, sizeof(strBuf), "X:%03d Y:%03d", tx, ty);
-            DisplayDriver::drawString(10, 232, strBuf, Colors::WHITE, Colors::DARKGRAY, 1);
+        if (isTouched && !wasPressed) {
+            int newLed = activeLed;
 
-            // Малювання в нижній сенсорній зоні
-            if (tx >= 18 && tx <= 300 && ty >= 170 && ty <= 225) {
-                DisplayDriver::fillRect(tx - 2, ty - 2, 5, 5, Colors::YELLOW);
+            if (btnRed.contains(tx, ty)) {
+                newLed = 1;
+            } else if (btnYellow.contains(tx, ty)) {
+                newLed = 2;
+            } else if (btnGreen.contains(tx, ty)) {
+                newLed = 3;
+            } else if (btnOff.contains(tx, ty)) {
+                newLed = 0;
             }
 
-            // Обробка кнопок (одинарне натискання)
-            if (!wasPressed) {
-                if (btnIncrement.contains(tx, ty)) {
-                    count++;
-                } else if (btnClear.contains(tx, ty)) {
-                    count = 0;
-                    DisplayDriver::fillRect(16, 168, 288, 60, Colors::DARKGRAY); // Очистити поле малювання
-                } else if (btnBL.contains(tx, ty)) {
-                    backlightState = !backlightState;
-                    DisplayDriver::setBacklight(backlightState);
-                }
-                wasPressed = true;
+            if (newLed != activeLed) {
+                activeLed = newLed;
+                LedController::setOnly(activeLed);
+
+                // Оновлення підсвічування кнопок на дисплеї
+                btnRed.draw(activeLed == 1);
+                btnYellow.draw(activeLed == 2);
+                btnGreen.draw(activeLed == 3);
+                btnOff.draw(activeLed == 0);
             }
-        } else {
+
+            wasPressed = true;
+        } else if (!isTouched) {
             wasPressed = false;
         }
 

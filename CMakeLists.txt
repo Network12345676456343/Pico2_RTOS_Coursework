@@ -15,6 +15,7 @@ pico_sdk_init()
 add_executable(${PROJECT_NAME}
     main.cpp
     lib/display_touch.cpp
+    lib/rgb_pot.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE
@@ -27,6 +28,7 @@ target_link_libraries(${PROJECT_NAME}
     hardware_spi
     hardware_i2c
     hardware_gpio
+    hardware_adc
 )
 
 pico_add_extra_outputs(${PROJECT_NAME})

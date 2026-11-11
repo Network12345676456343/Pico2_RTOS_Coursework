@@ -1,7 +1,8 @@
 #include "display_touch.hpp"
 #include "hardware/gpio.h"
+#include <algorithm>
 
-// Вбудований базовий 5x7 растровий шрифт
+// Базовий растровий шрифт 5x7
 static const uint8_t font5x7[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, // [space]
     0x00, 0x00, 0x5F, 0x00, 0x00, // !
@@ -137,7 +138,6 @@ void DisplayDriver::setAddressWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint
 }
 
 void DisplayDriver::init() {
-    // Ініціалізація пінів SPI
     spi_init(spi0, 40 * 1000 * 1000); // 40 МГц
     gpio_set_function(BoardPins::PIN_LCD_SCLK, GPIO_FUNC_SPI);
     gpio_set_function(BoardPins::PIN_LCD_MOSI, GPIO_FUNC_SPI);
@@ -155,7 +155,6 @@ void DisplayDriver::init() {
 
     sleep_ms(120);
 
-    // Ініціалізаційна послідовність ST7789
     writeCommand(0x01); // SWRESET
     sleep_ms(150);
 
@@ -163,7 +162,7 @@ void DisplayDriver::init() {
     sleep_ms(120);
 
     writeCommand(0x36); // MADCTL
-    writeData(0x70);    // Альбомна орієнтація (Landscape)
+    writeData(0x70);    // Альбомна орієнтація
 
     writeCommand(0x3A); // COLMOD
     writeData(0x55);    // 16-bit RGB565
@@ -200,7 +199,7 @@ void DisplayDriver::init() {
     writeData(0xA4);
     writeData(0xA1);
 
-    writeCommand(0x21); // INVON: інверсія кольору
+    writeCommand(0x21); // INVON
     writeCommand(0x29); // DISPON
     sleep_ms(50);
 
@@ -266,6 +265,48 @@ void DisplayDriver::drawFastVLine(int16_t x, int16_t y, int16_t h, uint16_t colo
     fillRect(x, y, 1, h, color);
 }
 
+void DisplayDriver::fillTriangle(int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t x2, int16_t y2, uint16_t color) {
+    int16_t a, b, y, last;
+    if (y0 > y1) { std::swap(y0, y1); std::swap(x0, x1); }
+    if (y1 > y2) { std::swap(y2, y1); std::swap(x2, x1); }
+    if (y0 > y1) { std::swap(y0, y1); std::swap(x0, x1); }
+
+    if (y0 == y2) {
+        a = b = x0;
+        if (x1 < a) a = x1; else if (x1 > b) b = x1;
+        if (x2 < a) a = x2; else if (x2 > b) b = x2;
+        drawFastHLine(a, y0, b - a + 1, color);
+        return;
+    }
+
+    int16_t dx01 = x1 - x0, dy01 = y1 - y0;
+    int16_t dx02 = x2 - x0, dy02 = y2 - y0;
+    int16_t dx12 = x2 - x1, dy12 = y2 - y1;
+    int32_t sa = 0, sb = 0;
+
+    last = (y1 == y2) ? y1 : y1 - 1;
+
+    for (y = y0; y <= last; y++) {
+        a = x0 + sa / dy01;
+        b = x0 + sb / dy02;
+        sa += dx01;
+        sb += dx02;
+        if (a > b) std::swap(a, b);
+        drawFastHLine(a, y, b - a + 1, color);
+    }
+
+    sa = static_cast<int32_t>(dx12) * (y - y1);
+    sb = static_cast<int32_t>(dx02) * (y - y0);
+    for (; y <= y2; y++) {
+        a = x1 + sa / dy12;
+        b = x0 + sb / dy02;
+        sa += dx12;
+        sb += dx02;
+        if (a > b) std::swap(a, b);
+        drawFastHLine(a, y, b - a + 1, color);
+    }
+}
+
 void DisplayDriver::drawChar(int16_t x, int16_t y, char c, uint16_t color, uint16_t bg, uint8_t size) {
     if (c < 32 || c > 126) c = '?';
     const uint8_t* charData = &font5x7[(c - 32) * 5];
@@ -282,7 +323,6 @@ void DisplayDriver::drawChar(int16_t x, int16_t y, char c, uint16_t color, uint1
             line >>= 1;
         }
     }
-    // Пробіл між символами (6-й стовпчик)
     if (size == 1) {
         drawFastVLine(x + 5, y, 8, bg);
     } else {
@@ -318,7 +358,7 @@ void TouchDriver::init() {
     gpio_init(BoardPins::PIN_TP_INT);
     gpio_set_dir(BoardPins::PIN_TP_INT, GPIO_IN);
 
-    // Апаратне скидання контролера тачскріна
+    // Скидання контролера тачскріна
     gpio_put(BoardPins::PIN_TP_RST, 0);
     sleep_ms(20);
     gpio_put(BoardPins::PIN_TP_RST, 1);
@@ -327,25 +367,22 @@ void TouchDriver::init() {
 
 bool TouchDriver::getTouch(int16_t &x, int16_t &y) {
     constexpr uint8_t I2C_ADDR = 0x38;
-    uint8_t reg = 0x02; // Регістр TD_STATUS (кількість активних дотиків)
+    uint8_t reg = 0x02; // TD_STATUS
     uint8_t data[5] = {0};
 
-    // Запит читання з регістру 0x02
     if (i2c_write_blocking(i2c0, I2C_ADDR, &reg, 1, true) < 0) return false;
     if (i2c_read_blocking(i2c0, I2C_ADDR, data, 5, false) < 0) return false;
 
     uint8_t touches = data[0] & 0x0F;
     if (touches == 0 || touches > 2) return false;
 
-    // Парсинг 12-бітних координат першої точки дотику
     uint16_t raw_x = ((data[1] & 0x0F) << 8) | data[2];
     uint16_t raw_y = ((data[3] & 0x0F) << 8) | data[4];
 
-    // Відображення координат на альбомний екран (320x240)
+    // Трансформація координат
     x = static_cast<int16_t>(raw_y);
     y = static_cast<int16_t>(240 - raw_x);
 
-    // Обмеження меж екрана
     if (x < 0) x = 0;
     if (x >= LCD_WIDTH) x = LCD_WIDTH - 1;
     if (y < 0) y = 0;
